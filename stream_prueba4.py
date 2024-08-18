@@ -2,10 +2,11 @@ import streamlit as st
 import pandas as pd
 from openpyxl import load_workbook
 from openpyxl.styles import PatternFill
+import os
 
-# Función para revisar AIRBNB
-def revisar_airbnb(file):
-    archivo_excel_original = file
+# Funciones de verificación (debes definir estas funciones)
+def revisar_airbnb(uploaded_file):
+    archivo_excel_original = uploaded_file
     hoja_consolidados = "CONSOLIDADO BANCO"
     hoja_pagos_airbnb = "PAGO AIRBNB "
     hoja_smoobu_airbnb = "SMOOBU AIRBNB"
@@ -159,11 +160,16 @@ def revisar_airbnb(file):
     wb.save(nuevo_archivo_excel)
 
     st.success(f"El nuevo archivo '{nuevo_archivo_excel}' ha sido creado con las hojas '{nueva_hoja_consolidados}', '{nueva_hoja_pagos_airbnb}', y '{nueva_hoja_smoobu_airbnb}'.")
+    
+    #df_final = pd.concat([df_consolidados_verificada, df_pagos_verificada, df_smoobu_airbnb], axis=1)
+    #return df_final
+    
 
+    return nuevo_archivo_excel
+    #pass
 
-# Función para revisar BOOKING
-def revisar_booking(file):
-    archivo_excel_original = file
+def revisar_booking(uploaded_file):
+    archivo_excel_original = uploaded_file
     hoja_consolidados = "CONSOLIDADO BANCO"
     hoja_pagos_booking = "PAGO BOOKING"
     hoja_smoobu_booking = "SMOOBU BOOKING"
@@ -392,26 +398,55 @@ def revisar_booking(file):
     wb.save(nuevo_archivo_excel)
 
     st.success(f"El nuevo archivo '{nuevo_archivo_excel}' ha sido creado con las hojas '{nueva_hoja_consolidados}', '{nueva_hoja_pagos_booking}', y '{nueva_hoja_smoobu_booking}'.")
+    
+    #df_final = pd.concat([df_consolidados_filtrados_sorted, df_pagos_verificada, df_smoobu], axis=1)
+    #return df_final
 
-# Función principal
+
+    return nuevo_archivo_excel
+    #pass
+
+# Interfaz de usuario con Streamlit
 def main():
     st.title("Verificación de Pagos Airbnb y Booking")
-    
-    # Cargar el archivo de Excel
-    archivo_excel = st.file_uploader("Subir archivo Excel", type=["xlsx"])
 
-    if archivo_excel is not None:
-        file_details = {"FileName": archivo_excel.name, "FileType": archivo_excel.type}
-        st.write(file_details)
+    st.write("PASO 1:  Carga el archivo Excel original de Airbnb o Booking para comenzar la verificación.")
 
-        # Mostrar botón para Airbnb
-        if st.button('Revisar Airbnb'):
-            revisar_airbnb(archivo_excel)
+    uploaded_file = st.file_uploader("Subir archivo Excel", type=["xlsx"])
 
-        # Mostrar botón para Booking
-        if st.button('Revisar Booking'):
-            revisar_booking(archivo_excel)
+    if uploaded_file is not None:
+        st.write("PASO 2:  Elige la plataforma para la cual deseas realizar la verificación:")
+        option = st.selectbox("Selecciona la plataforma", ["Airbnb", "Booking"])
 
-# Ejecutar la aplicación
+        if st.button("Iniciar verificación"):
+            if option == "Airbnb":
+                nuevo_archivo_excel=revisar_airbnb(uploaded_file)
+                #df_resultante=revisar_airbnb(uploaded_file)
+            elif option == "Booking":
+                nuevo_archivo_excel=revisar_booking(uploaded_file)
+                #df_resultante=revisar_booking(uploaded_file)
+
+            # Guardar el archivo Excel verificado
+            #nuevo_archivo_excel = 'nuevo_archivo_verificado.xlsx'
+            
+            #df_resultante.to_excel(nuevo_archivo_excel, index=False)
+            
+
+             # Verificar si nuevo_archivo_excel no es None
+            if nuevo_archivo_excel is not None:
+                # Verificar si el archivo existe antes de intentar abrirlo
+                if os.path.exists(nuevo_archivo_excel):
+                    with open(nuevo_archivo_excel, 'rb') as file:
+                        btn = st.download_button(
+                            label='Descargar archivo Excel verificado',
+                            data=file,
+                            file_name=nuevo_archivo_excel,
+                            mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+                        )
+                else:
+                    st.error("El archivo no se pudo encontrar. Por favor, verifica que la función de revisión haya generado el archivo correctamente.")
+            else:
+                st.error("La función de revisión no devolvió un nombre de archivo válido. Por favor, verifica las funciones revisar_airbnb y revisar_booking.")
+
 if __name__ == "__main__":
     main()
