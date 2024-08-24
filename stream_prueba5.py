@@ -81,6 +81,32 @@ def revisar_airbnb(uploaded_file):
     # Aplicar la verificación y crear la columna 'PAGO DEFINITIVO'
     df_pagos_verificada['PAGO DEFINITIVO'] = df_pagos_verificada.apply(verificar_pago, axis=1)
 
+    # Función para calcular la columna 'OBS'
+    def calcular_obs(df):
+        obs = [""] * len(df)  # Inicializa la columna OBS con valores vacíos
+
+        for i, row in df.iterrows():
+            if row['Tipo'].lower() == "payout" and pd.notna(row['Cobrado']):
+                suma_importe = 0
+                cobrado = row['Cobrado']
+
+                # Iterar a partir de la siguiente fila
+                for j in range(i + 1, len(df)):
+                    if pd.isna(df.at[j, 'Importe']) or df.at[j, 'Tipo'].lower() != "reserva":
+                        break
+                    suma_importe += df.at[j, 'Importe']
+
+                # Comparar la suma con el valor de 'Cobrado'
+                if suma_importe == cobrado:
+                    for j in range(i + 1, len(df)):
+                        if df.at[j, 'Tipo'].lower() == "reserva":
+                            obs[j] = "P" if row['PAGO DEFINITIVO'] == "PAGADO" else "NP"
+
+        return obs
+
+    # Aplicar la función para calcular 'OBS' y agregar la columna a 'df_pagos_verificada'
+    df_pagos_verificada['OBS'] = calcular_obs(df_pagos_verificada)
+
     # Leer la hoja 'SMOOBU AIRBNB'
     df_smoobu_airbnb = pd.read_excel(archivo_excel_original, sheet_name=hoja_smoobu_airbnb)
 
@@ -156,17 +182,20 @@ def revisar_airbnb(uploaded_file):
             elif cell.value == "NOS HAN TIMADO":
                 cell.fill = red_fill
 
+    # **Nuevo**: Aplicar formato condicional a la columna 'estado' en la hoja 'SMOOBU AIRBNB VERIFICADA'
+    estado_col_idx = df_smoobu_airbnb.columns.get_loc('estado') + 1
+    for row in ws_smoobu_airbnb.iter_rows(min_row=2, min_col=estado_col_idx, max_col=estado_col_idx, max_row=ws_smoobu_airbnb.max_row):
+        for cell in row:
+            if cell.value == "Cancelado":
+                cell.fill = red_fill
+
     # Guardar el archivo con los cambios
     wb.save(nuevo_archivo_excel)
 
     st.success(f"El nuevo archivo '{nuevo_archivo_excel}' ha sido creado con las hojas '{nueva_hoja_consolidados}', '{nueva_hoja_pagos_airbnb}', y '{nueva_hoja_smoobu_airbnb}'.")
-    
-    #df_final = pd.concat([df_consolidados_verificada, df_pagos_verificada, df_smoobu_airbnb], axis=1)
-    #return df_final
-    
 
     return nuevo_archivo_excel
-    #pass
+
 
 def revisar_booking(uploaded_file):
     archivo_excel_original = uploaded_file
