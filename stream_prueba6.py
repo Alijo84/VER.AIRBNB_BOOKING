@@ -58,6 +58,10 @@ def revisar_airbnb(uploaded_file):
     df_pagos['Fecha'] = pd.to_datetime(df_pagos['Fecha'], dayfirst=True)
     df_pagos['Fecha'] = df_pagos['Fecha'].dt.strftime('%d/%m/%Y')
 
+    # Redondear a dos cifras significativas en las columnas 'Importe' y 'Cobrado'
+    df_pagos['Importe'] = df_pagos['Importe'].apply(lambda x: round(x, 2))
+    df_pagos['Cobrado'] = df_pagos['Cobrado'].apply(lambda x: round(x, 2))
+
     # Crear una copia de df_pagos para la hoja verificada
     df_pagos_verificada = df_pagos.copy()
 
@@ -119,26 +123,38 @@ def revisar_airbnb(uploaded_file):
     cols.insert(index_comision + 1, cols.pop(cols.index('Pago Neto')))
     df_smoobu_airbnb = df_smoobu_airbnb[cols]
 
+     
+
     # Crear una función para observar pagos y verificar las fechas y montos
     def observar_pago(row):
         reserva = row['reserva']
         fecha_llegada = pd.to_datetime(row['Llegada'], dayfirst=True)
-        pago_neto = row['Pago Neto']
+        pago_neto = round(row['Pago Neto'], 2)  # Redondear a dos cifras significativas
         
-        df_filtrado = df_pagos_verificada[df_pagos_verificada['Código de confirmación'] == reserva]
-        
-        if not df_filtrado.empty:
-            return "PAGADO"
-        
+        # Primera parte: Verificar en consolidados bancos verificada
         df_filtrado_consolidados = df_consolidados_verificada[
+            (round(df_consolidados_verificada['MONTO'], 2) == pago_neto) &  # Redondear MONTO
             (pd.to_datetime(df_consolidados_verificada['FECHA'], dayfirst=True) >= fecha_llegada) &
-            (df_consolidados_verificada['MONTO'] == pago_neto)
+            (pd.to_datetime(df_consolidados_verificada['FECHA'], dayfirst=True) <= fecha_llegada + pd.Timedelta(days=10))
         ]
         
         if not df_filtrado_consolidados.empty:
             return "PAGADO"
         
-        return "NOS HAN TIMADO"
+        # Segunda parte: Verificar en pagos airbnb verificada
+        df_filtrado_pagos_airbnb = df_pagos_verificada[
+            (round(df_pagos_verificada['Importe'], 2) == pago_neto) &  # Redondear Importe
+            (df_pagos_verificada['Código de confirmación'] == reserva)
+        ]
+        
+        if not df_filtrado_pagos_airbnb.empty:
+            return "PAGADO"
+        
+        # Si ninguna de las condiciones se cumple
+        return "NOS HAN TIMAOO"
+
+
+
 
     # Aplicar la observación y crear la columna 'OBSERVACION'
     df_smoobu_airbnb['OBSERVACION'] = df_smoobu_airbnb.apply(observar_pago, axis=1)
@@ -179,7 +195,7 @@ def revisar_airbnb(uploaded_file):
         for cell in row:
             if cell.value == "PAGADO":
                 cell.fill = green_fill
-            elif cell.value == "NOS HAN TIMADO":
+            elif cell.value == "NOS HAN TIMAOO":
                 cell.fill = red_fill
 
     # **Nuevo**: Aplicar formato condicional a la columna 'estado' en la hoja 'SMOOBU AIRBNB VERIFICADA'
@@ -189,12 +205,29 @@ def revisar_airbnb(uploaded_file):
             if cell.value == "Cancelado":
                 cell.fill = red_fill
 
+
+     # **Nuevo**: Aplicar formato condicional a la columna 'Pagado' en la hoja 'SMOOBU AIRBNB VERIFICADA'
+    estado_col_idx = df_smoobu_airbnb.columns.get_loc('Pagado') + 1
+    for row in ws_smoobu_airbnb.iter_rows(min_row=2, min_col=estado_col_idx, max_col=estado_col_idx, max_row=ws_smoobu_airbnb.max_row):
+        for cell in row:
+            if cell.value == "No":
+                cell.fill = red_fill            
+
+
+
+
+
+
+
+
     # Guardar el archivo con los cambios
     wb.save(nuevo_archivo_excel)
 
     st.success(f"El nuevo archivo '{nuevo_archivo_excel}' ha sido creado con las hojas '{nueva_hoja_consolidados}', '{nueva_hoja_pagos_airbnb}', y '{nueva_hoja_smoobu_airbnb}'.")
 
     return nuevo_archivo_excel
+
+
 
 
 def revisar_booking(uploaded_file):
