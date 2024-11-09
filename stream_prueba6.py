@@ -1,8 +1,18 @@
 import streamlit as st
 import pandas as pd
 from openpyxl import load_workbook
-from openpyxl.styles import PatternFill
+from openpyxl.styles import PatternFill, Font
 import os
+from openpyxl.chart import BarChart, Reference, LineChart
+from openpyxl.drawing.image import Image
+from openpyxl.chart.axis import Title
+from openpyxl.chart.label import DataLabelList
+import matplotlib.pyplot as plt
+import io
+from openpyxl.formatting.rule import ColorScaleRule, FormulaRule
+
+
+
 
 # Funciones de verificación (debes definir estas funciones)
 def revisar_airbnb(uploaded_file):
@@ -165,15 +175,209 @@ def revisar_airbnb(uploaded_file):
     cols.insert(index_reserva + 1, cols.pop(cols.index('OBSERVACION')))
     df_smoobu_airbnb = df_smoobu_airbnb[cols]
 
+    #-----------------------------------------------------------------------------------------
+
+
+    # TABLAS HOJA RESUMEN AIRBNB
+
+    # TABLA INGRESOS BANCOS (HOJA RESUMEN AIRBNB)
+
+    # Crear la hoja "RESUMEN AIRBNB"
+    df_resumen = pd.DataFrame(columns=['BANCO'] + [mes for mes in ['ENERO', 'FEBRERO', 'MARZO', 'ABRIL', 'MAYO', 'JUNIO', 'JULIO', 'AGOSTO', 'SEPTIEMBRE', 'OCTUBRE', 'NOVIEMBRE', 'DICIEMBRE']])
+
+    # Obtener los bancos únicos
+    bancos_unicos = df_consolidados_verificada['BANCO'].unique()
+
+    # Llenar el DataFrame de resumen
+    for banco in bancos_unicos:
+        fila = {'BANCO': banco}
+        for i, mes in enumerate(['ENERO', 'FEBRERO', 'MARZO', 'ABRIL', 'MAYO', 'JUNIO', 'JULIO', 'AGOSTO', 'SEPTIEMBRE', 'OCTUBRE', 'NOVIEMBRE', 'DICIEMBRE']):
+            df_mes = df_consolidados_verificada[(df_consolidados_verificada['BANCO'] == banco) & 
+                                                (pd.to_datetime(df_consolidados_verificada['FECHA']).dt.month == i+1)]
+            fila[mes] = df_mes['MONTO'].sum()
+        df_resumen = pd.concat([df_resumen, pd.DataFrame([fila])], ignore_index=True)
+
+    # Calcular el total
+    df_resumen.loc['TOTAL'] = df_resumen.sum(numeric_only=True)
+    df_resumen.loc['TOTAL', 'BANCO'] = 'TOTAL'
+
+    ####------------------------------------------------------------------------------------------------------------------
+
+
+
+    # TABLA INGRESOS SEGUN AIRBNB (HOJA RESUMEN AIRBNB)
+
+
+    # Crear la hoja "RESUMEN AIRBNB"
+    df_resumen1 = pd.DataFrame(columns=['Alojamiento'] + [mes for mes in ['ENERO', 'FEBRERO', 'MARZO', 'ABRIL', 'MAYO', 'JUNIO', 'JULIO', 'AGOSTO', 'SEPTIEMBRE', 'OCTUBRE', 'NOVIEMBRE', 'DICIEMBRE']] + ['TOTAL/APARTAMENTO'])
+
+    # Obtener los alojamientos únicos
+    alojamientos_unicos = df_pagos_verificada['Alojamiento'].unique()
+
+    # Llenar el DataFrame de resumen
+    for alojamiento in alojamientos_unicos:
+        fila = {'Alojamiento': alojamiento}
+        total_por_apartamento = 0  # Variable para almacenar la suma de todos los meses por alojamiento
+        
+        for i, mes in enumerate(['ENERO', 'FEBRERO', 'MARZO', 'ABRIL', 'MAYO', 'JUNIO', 'JULIO', 'AGOSTO', 'SEPTIEMBRE', 'OCTUBRE', 'NOVIEMBRE', 'DICIEMBRE']):
+            df_mes = df_pagos_verificada[
+                (df_pagos_verificada['Alojamiento'] == alojamiento) & 
+                (pd.to_datetime(df_pagos_verificada['Fecha'], dayfirst=True).dt.month == i + 1)
+            ]
+            monto_mes = df_mes['Importe'].sum()
+            fila[mes] = monto_mes
+            total_por_apartamento += monto_mes  # Sumar el monto del mes al total del alojamiento
+
+        fila['TOTAL/APARTAMENTO'] = total_por_apartamento  # Agregar el total de todos los meses para este alojamiento
+        df_resumen1 = pd.concat([df_resumen1, pd.DataFrame([fila])], ignore_index=True)
+
+    # Calcular el total general
+    df_resumen1.loc['TOTAL'] = df_resumen1.sum(numeric_only=True)
+    df_resumen1.loc['TOTAL', 'Alojamiento'] = 'TOTAL'
+
+    #####---------------------------------------------------------------------------------------
+    # Agregar la columna "% de Peso"
+    #df_resumen1['% de Peso'] = (df_resumen1['TOTAL/APARTAMENTO'] / df_resumen1.loc['TOTAL', 'TOTAL/APARTAMENTO'] * 100).round(2)
+
+    # Reemplazar el valor de "% de Peso" en la fila de "TOTAL" por vacío (opcional)
+    #df_resumen1.loc['TOTAL', '% de Peso'] = ''
+
+
+
+    
+    ####--------------------------------------------------------------------------------------------------------------------
+
+
     # Escribir los DataFrames en un nuevo archivo Excel con las nuevas hojas
+
     with pd.ExcelWriter(nuevo_archivo_excel, engine='openpyxl') as writer:
         df_consolidados_verificada.to_excel(writer, sheet_name=nueva_hoja_consolidados, index=False)
         df_pagos_verificada.to_excel(writer, sheet_name=nueva_hoja_pagos_airbnb, index=False)
         df_smoobu_airbnb.to_excel(writer, sheet_name=nueva_hoja_smoobu_airbnb, index=False)
+        
+        # Escribir la hoja de resumen PRIMER TABLA (BANCOS)
+        df_resumen.to_excel(writer, sheet_name='RESUMEN AIRBNB', index=False, startrow=2)
 
-    # Cargar el archivo Excel para aplicar el formato condicional
+        # Escribir la hoja "RESUMEN AIRBNB" SEGUNDA TABLA (AIR)
+        df_resumen1.to_excel(writer, sheet_name='RESUMEN AIRBNB', index=False, startrow=27)
+
+    # Cargar el archivo Excel para aplicar el formato
     wb = load_workbook(nuevo_archivo_excel)
+    ws_resumen = wb['RESUMEN AIRBNB']
 
+
+
+    ####  MAPAS DE CALOR  -------------------------------------------------------
+
+
+
+
+    # MAPA DE CALOR 1 COLUMNA TOTAL/APARTAMNETO
+     
+
+
+    # Identificar la columna de TOTAL/APARTAMENTO
+    columna_total = df_resumen1.columns.get_loc('TOTAL/APARTAMENTO') + 1  # +1 porque Excel usa base 1
+
+    # Determinar el rango para aplicar el formato condicional
+    start_row = 28  # Primera fila donde empieza la tabla en Excel
+    end_row = start_row + len(df_resumen1) - 1  # Fila final de los datos (excluyendo el encabezado)
+    columna_excel = ws_resumen.cell(row=start_row, column=columna_total).column_letter  # Obtener letra de la columna en Excel
+
+    # Aplicar una escala de color de azul claro a azul oscuro
+    color_scale_rule = ColorScaleRule(
+        start_type="min", start_color="B3CDE3",  # Azul claro
+        end_type="max", end_color="045A8D"       # Azul oscuro
+    )
+
+    # Aplicar la regla de color a la columna TOTAL/APARTAMENTO (columna correspondiente)
+    ws_resumen.conditional_formatting.add(f"{columna_excel}{start_row}:{columna_excel}{end_row}", color_scale_rule)
+
+
+
+    # MAPA DE CLAOR 2 APARTAMENTOS DESDE ENERO A DICIEMBRE
+
+
+    # Definir el rango de celdas donde se aplicará el formato (toda la tabla menos TOTAL/APARTAMENTO)
+    start_row = 28  # Primera fila de la tabla
+    end_row = start_row + len(df_resumen1) - 1  # Fila final de la tabla
+    start_col = 'B'  # Columna inicial para los meses
+    total_apartamento_col = df_resumen1.shape[1]  # Índice de la columna TOTAL/APARTAMENTO
+
+    # Determinar la letra de la última columna antes de TOTAL/APARTAMENTO
+    total_col_letter = ws_resumen.cell(row=start_row, column=total_apartamento_col).column_letter
+    rango_tabla = ws_resumen[f"{start_col}{start_row}":f"{chr(ord(total_col_letter) - 1)}{end_row}"]
+
+    # Obtener los valores de la tabla para calcular el rango de valores positivos
+    valores = [cell.value for row in rango_tabla for cell in row if isinstance(cell.value, (int, float)) and cell.value > 0]
+
+    # Verificar que existen valores mayores a cero
+    if valores:
+        min_val = min(valores)
+        max_val = max(valores)
+
+        # Definir función para calcular el color en función del valor
+        def obtener_color(valor):
+            if valor <= 0:
+                return PatternFill(start_color="FFFFFF", end_color="FFFFFF", fill_type="solid")  # Blanco para valores <= 0
+            ratio = (valor - min_val) / (max_val - min_val) if max_val > min_val else 0
+            if ratio > 0.40:
+                return PatternFill(start_color="63BE7B", end_color="63BE7B", fill_type="solid")  # Verde
+            elif ratio > 0.20:
+                return PatternFill(start_color="FFEB84", end_color="FFEB84", fill_type="solid")  # Amarillo
+            else:
+                return PatternFill(start_color="F8696B", end_color="F8696B", fill_type="solid")  # Rojo
+
+        # Aplicar el color a cada celda en el rango
+        for row in rango_tabla:
+            for cell in row:
+                if isinstance(cell.value, (int, float)) and cell.value > 0:
+                    cell.fill = obtener_color(cell.value)
+
+
+
+    # LEYENDAS MAPA DE CALOR
+
+
+    # LEYENDA 1 MAPA VERDE/AMARILLO/VERDE
+
+    leyenda_inicio_fila = end_row + 3  # Colocamos la leyenda un par de filas debajo de la tabla
+    ws_resumen[f"A{leyenda_inicio_fila}"] = "Leyenda Mapa de Calor (INGRESOS MENSUALES POR APARTAMENTO (EUR) )"
+    ws_resumen[f"A{leyenda_inicio_fila + 1}"] = "Valor alto"
+    ws_resumen[f"A{leyenda_inicio_fila + 2}"] = "Valor medio"
+    ws_resumen[f"A{leyenda_inicio_fila + 3}"] = "Valor bajo"
+
+    # Aplicar colores correspondientes a cada valor de la leyenda
+    ws_resumen[f"B{leyenda_inicio_fila + 1}"].fill = PatternFill(start_color="63BE7B", end_color="63BE7B", fill_type="solid")  # Verde (alto)
+    ws_resumen[f"B{leyenda_inicio_fila + 2}"].fill = PatternFill(start_color="FFEB84", end_color="FFEB84", fill_type="solid")  # Amarillo (medio)
+    ws_resumen[f"B{leyenda_inicio_fila + 3}"].fill = PatternFill(start_color="F8696B", end_color="F8696B", fill_type="solid")  # Rojo (bajo)
+
+
+    # LEYENDA 2 MAPA AZUL (TOTAL APARTAMENTOS)
+
+    # Agregar una leyenda al lado de la tabla
+    leyenda_inicio_fila = end_row + 8  # Colocamos la leyenda un par de filas debajo de la tabla
+    ws_resumen[f"A{leyenda_inicio_fila}"] = "Leyenda  Mapa de Calor (INGRESO ANUAL POR APARTAMENTO (EUR))"
+    ws_resumen[f"A{leyenda_inicio_fila + 1}"] = "Valor alto"
+    ws_resumen[f"A{leyenda_inicio_fila + 2}"] = "Valor medio"
+    ws_resumen[f"A{leyenda_inicio_fila + 3}"] = "Valor bajo"
+
+    # Aplicar colores correspondientes a cada valor de la leyenda
+    ws_resumen[f"B{leyenda_inicio_fila + 1}"].fill = PatternFill(start_color="045A8D", end_color="045A8D", fill_type="solid")  # Azul oscuro (alto)
+    ws_resumen[f"B{leyenda_inicio_fila + 2}"].fill = PatternFill(start_color="6497B1", end_color="6497B1", fill_type="solid")  # Azul medio
+    ws_resumen[f"B{leyenda_inicio_fila + 3}"].fill = PatternFill(start_color="B3CDE3", end_color="B3CDE3", fill_type="solid")  # Azul claro (bajo)
+
+
+
+
+
+
+    # Guardar el archivo con los cambios
+    wb.save(nuevo_archivo_excel)
+        
+    
+
+   ####-------------------------------------------------------------------------------------------
     # Aplicar formato condicional a la hoja 'PAGOS AIRBNB VERIFICADA'
     ws_pagos_airbnb = wb[nueva_hoja_pagos_airbnb]
     green_fill = PatternFill(start_color="00FF00", end_color="00FF00", fill_type="solid")
@@ -211,19 +415,137 @@ def revisar_airbnb(uploaded_file):
     for row in ws_smoobu_airbnb.iter_rows(min_row=2, min_col=estado_col_idx, max_col=estado_col_idx, max_row=ws_smoobu_airbnb.max_row):
         for cell in row:
             if cell.value == "No":
-                cell.fill = red_fill            
+                cell.fill = red_fill    
+
+
+# ENCABEZADOS Y TITULOS TABLAS DE HOJA RESUMEN 
+
+
+# TABLA 1
+
+ # Agregar y formatear el título
+    ws_resumen['A1'] = 'INGRESOS AIRBNB (POR BANCO Y TOTAL EN EUROS)'
+    ws_resumen['A1'].font = Font(bold=True, size=14)
+    ws_resumen.merge_cells('A1:M1')
+
+###---------------------------------------------------------------------------------------------------------
+
+# TABLA 2
+
+# Agregar y formatear el título
+    ws_resumen['A26'] = 'INGRESOS AIRBNB (POR APARTAMENTO Y TOTAL EN EUROS)'
+    ws_resumen['A26'].font = Font(bold=True, size=14)
+    ws_resumen.merge_cells('A26:M26')
+
+
+###--------------------------------------------------------------------------------------------------------
+
+   
+    # Seleccionar la hoja RESUMEN AIRBNB
+    ws_resumen = wb['RESUMEN AIRBNB']
 
 
 
 
 
 
+##------------------------------------------------------------------------------------------------------------------------------------------------------------------                  def crear_grafico_lineas(ws_resumen):
+    
+    # GRFICOS HOJA RES
 
+    # GRAFICO TABLA 1
+    
+    def agregar_grafico_barras(ws_resumen):
+        
+        # Definir el rango de datos para el gráfico
+        data = Reference(ws_resumen, min_col=2, min_row=7, max_col=13, max_row=7)
+        categories = Reference(ws_resumen, min_col=2, min_row=3, max_col=13, max_row=13)
+
+        # Crear un objeto de gráfico de barras
+        chart = BarChart()
+        chart.title = 'INGRESOS AIRBNB (POR BANCO Y TOTAL EN EUROS)'
+        chart.y_axis.title = "TOTAL (EUROS)"
+        chart.x_axis.title = "MESES"
+
+        # Añadir los datos y categorías al gráfico
+        chart.add_data(data, titles_from_data=False)
+        chart.set_categories(categories)
+
+        # Configurar los títulos del eje y añadir etiquetas de datos
+        #chart.dataLabels = DataLabelList()
+        #chart.dataLabels.showVal = True
+
+
+    # Ajustar para que los meses aparezcan directamente debajo de cada barra
+        chart.x_axis.majorTickMark = "out"  # Marca de mayor precisión en el eje X
+        chart.x_axis.label_alignment = "center"  # Centra cada mes debajo de cada barra
+
+
+
+        # Añadir el gráfico a la hoja, colocando el gráfico en una celda específica
+        ws_resumen.add_chart(chart, "A10")
+
+    # Llamar a la función para agregar el gráfico de barras en la hoja "RESUMEN AIRBNB"
+    agregar_grafico_barras(ws_resumen)
+
+
+
+    # GRAFICO TABLA 2
+
+    def agregar_grafico_barras2(ws_resumen):
+        
+        # Definir el rango de datos para el gráfico
+        data = Reference(ws_resumen, min_col=2, min_row=42, max_col=13, max_row=42)
+        categories = Reference(ws_resumen, min_col=2, min_row=28, max_col=13, max_row=41)
+
+        # Crear un objeto de gráfico de barras
+        chart = BarChart()
+        chart.title = 'INGRESOS AIRBNB (TOTAL APARTAMENTOS EN EUROS)'
+        chart.y_axis.title = "TOTAL (EUROS)"
+        chart.x_axis.title = "MESES"
+
+        # Añadir los datos y categorías al gráfico
+        chart.add_data(data, titles_from_data=False)
+        chart.set_categories(categories)
+
+        # Configurar los títulos del eje y añadir etiquetas de datos
+        #chart.dataLabels = DataLabelList()
+        #chart.dataLabels.showVal = True
+
+
+    # Ajustar para que los meses aparezcan directamente debajo de cada barra
+        chart.x_axis.majorTickMark = "out"  # Marca de mayor precisión en el eje X
+        chart.x_axis.label_alignment = "center"  # Centra cada mes debajo de cada barra
+
+
+
+        # Añadir el gráfico a la hoja, colocando el gráfico en una celda específica
+        ws_resumen.add_chart(chart, "A54")
+
+    # Llamar a la función para agregar el gráfico de barras en la hoja "RESUMEN AIRBNB"
+    agregar_grafico_barras2(ws_resumen)
+
+
+
+
+
+
+   
+           
+
+    
+        
+        
+   
+
+
+
+##----------------------------------------------------------------------------------------------------------------------------------------------------
 
     # Guardar el archivo con los cambios
     wb.save(nuevo_archivo_excel)
 
-    st.success(f"El nuevo archivo '{nuevo_archivo_excel}' ha sido creado con las hojas '{nueva_hoja_consolidados}', '{nueva_hoja_pagos_airbnb}', y '{nueva_hoja_smoobu_airbnb}'.")
+    st.success(f"El nuevo archivo '{nuevo_archivo_excel}' ha sido creado con las hojas '{nueva_hoja_consolidados}', '{nueva_hoja_pagos_airbnb}', '{nueva_hoja_smoobu_airbnb}', y 'RESUMEN AIRBNB'.")
 
     return nuevo_archivo_excel
 
@@ -425,16 +747,219 @@ def revisar_booking(uploaded_file):
 
     df_smoobu['OBSERVACION B'] = df_smoobu.apply(observar_b, axis=1)
 
+    #----------------------------------------------------------------------------------------------
+    
+    # TABLAS HOJA RESUMEN BOOKING
+
+    # TABLA 1 INGRESOS BANCOS (HOJA RESUMEN AIRBNB)
+    
+    
+    # Crear la hoja "RESUMEN BOOKING"
+    df_resumen = pd.DataFrame(columns=['BANCO'] + [mes for mes in ['ENERO', 'FEBRERO', 'MARZO', 'ABRIL', 'MAYO', 'JUNIO', 'JULIO', 'AGOSTO', 'SEPTIEMBRE', 'OCTUBRE', 'NOVIEMBRE', 'DICIEMBRE']])
+
+    # Obtener los bancos únicos
+    bancos_unicos = df_consolidados_filtrados_sorted['BANCO'].unique()
+
+    # Llenar el DataFrame de resumen
+    for banco in bancos_unicos:
+        fila = {'BANCO': banco}
+        for i, mes in enumerate(['ENERO', 'FEBRERO', 'MARZO', 'ABRIL', 'MAYO', 'JUNIO', 'JULIO', 'AGOSTO', 'SEPTIEMBRE', 'OCTUBRE', 'NOVIEMBRE', 'DICIEMBRE']):
+            df_mes = df_consolidados_filtrados_sorted[(df_consolidados_filtrados_sorted['BANCO'] == banco) & 
+                                                (pd.to_datetime(df_consolidados_filtrados_sorted['FECHA']).dt.month == i+1)]
+            fila[mes] = df_mes['MONTO'].sum()
+        df_resumen = pd.concat([df_resumen, pd.DataFrame([fila])], ignore_index=True)
+
+    # Calcular el total
+    df_resumen.loc['TOTAL'] = df_resumen.sum(numeric_only=True)
+    df_resumen.loc['TOTAL', 'BANCO'] = 'TOTAL'
+
+
+    # TABLA 2 INGRESOS SEGUN BOOKING (HOJA RESUMEN BOOKING)
+
+
+    # Crear la hoja "RESUMEN BOOKING"
+    df_resumen1 = pd.DataFrame(columns=['apartamento'] + [mes for mes in ['ENERO', 'FEBRERO', 'MARZO', 'ABRIL', 'MAYO', 'JUNIO', 'JULIO', 'AGOSTO', 'SEPTIEMBRE', 'OCTUBRE', 'NOVIEMBRE', 'DICIEMBRE']] + ['TOTAL/APARTAMENTO'])
+
+    # Obtener los alojamientos únicos
+    alojamientos_unicos = df_pagos_verificada['apartamento'].unique()
+
+    # Llenar el DataFrame de resumen
+    for alojamiento in alojamientos_unicos:
+        fila = {'apartamento': alojamiento}
+        total_por_apartamento = 0  # Variable para almacenar la suma de todos los meses por alojamiento
+        
+        for i, mes in enumerate(['ENERO', 'FEBRERO', 'MARZO', 'ABRIL', 'MAYO', 'JUNIO', 'JULIO', 'AGOSTO', 'SEPTIEMBRE', 'OCTUBRE', 'NOVIEMBRE', 'DICIEMBRE']):
+            df_mes = df_pagos_verificada[
+                (df_pagos_verificada['apartamento'] == alojamiento) & 
+                (pd.to_datetime(df_pagos_verificada['Payout date'], dayfirst=True).dt.month == i + 1)
+            ]
+            monto_mes = df_mes['Net'].sum()
+            fila[mes] = monto_mes
+            total_por_apartamento += monto_mes  # Sumar el monto del mes al total del alojamiento
+
+        fila['TOTAL/APARTAMENTO'] = total_por_apartamento  # Agregar el total de todos los meses para este alojamiento
+        df_resumen1 = pd.concat([df_resumen1, pd.DataFrame([fila])], ignore_index=True)
+
+
+
+
+    # Calcular el total general
+    df_resumen1.loc['TOTAL'] = df_resumen1.sum(numeric_only=True)
+    df_resumen1.loc['TOTAL', 'apartamento'] = 'TOTAL'
+
+    ####-----------------------------------------------------------------------------
+
+    #Agregar la columna "% de Peso"
+    #df_resumen1['% de Peso'] = (df_resumen1['TOTAL/APARTAMENTO'] / df_resumen1.loc['TOTAL', 'TOTAL/APARTAMENTO'] * 100).round(2)
+
+    # Reemplazar el valor de "% de Peso" en la fila de "TOTAL" por vacío (opcional)
+    #df_resumen1.loc['TOTAL', '% de Peso'] = ''
+
+
+
+
+    ##----------------------------------------------------------------------------------------------------
+
     # Escribir los DataFrames en un nuevo archivo Excel con las nuevas hojas
     with pd.ExcelWriter(nuevo_archivo_excel, engine='openpyxl') as writer:
         df_consolidados_filtrados_sorted.to_excel(writer, sheet_name=nueva_hoja_consolidados, index=False)
         df_pagos_verificada.to_excel(writer, sheet_name=nueva_hoja_pagos_booking, index=False)
         df_smoobu.to_excel(writer, sheet_name=nueva_hoja_smoobu_booking, index=False)
 
+        # Escribir la hoja de resumen
+        df_resumen.to_excel(writer, sheet_name='RESUMEN BOOKING', index=False, startrow=2)
+
+        # Escribir la hoja "RESUMEN BOOKING" SEGUNDA TABLA 
+        df_resumen1.to_excel(writer, sheet_name='RESUMEN BOOKING', index=False, startrow=28)
+
+
     # Cargar el archivo Excel para aplicar el formato condicional
     wb = load_workbook(nuevo_archivo_excel)
     ws_pagos_booking = wb[nueva_hoja_pagos_booking]
     ws_smoobu_booking = wb[nueva_hoja_smoobu_booking]
+
+    ws_resumen = wb['RESUMEN BOOKING']
+
+#-------------------------------------------------------------------------------------------------
+
+####  MAPAS DE CALOR  -------------------------------------------------------
+
+
+
+
+    # MAPA DE CALOR 1 COLUMNA TOTAL/APARTAMNETO
+     
+
+
+    # Identificar la columna de TOTAL/APARTAMENTO
+    columna_total = df_resumen1.columns.get_loc('TOTAL/APARTAMENTO') + 1  # +1 porque Excel usa base 1
+
+    # Determinar el rango para aplicar el formato condicional
+    start_row = 29  # Primera fila donde empieza la tabla en Excel
+    end_row = start_row + len(df_resumen1) - 1  # Fila final de los datos (excluyendo el encabezado)
+    columna_excel = ws_resumen.cell(row=start_row, column=columna_total).column_letter  # Obtener letra de la columna en Excel
+
+    # Aplicar una escala de color de azul claro a azul oscuro
+    color_scale_rule = ColorScaleRule(
+        start_type="min", start_color="B3CDE3",  # Azul claro
+        end_type="max", end_color="045A8D"       # Azul oscuro
+    )
+
+    # Aplicar la regla de color a la columna TOTAL/APARTAMENTO (columna correspondiente)
+    ws_resumen.conditional_formatting.add(f"{columna_excel}{start_row}:{columna_excel}{end_row}", color_scale_rule)
+
+
+
+    # MAPA DE CLAOR 2 APARTAMENTOS DESDE ENERO A DICIEMBRE
+
+
+    # Definir el rango de celdas donde se aplicará el formato (toda la tabla menos TOTAL/APARTAMENTO)
+    start_row = 29  # Primera fila de la tabla
+    end_row = start_row + len(df_resumen1) - 1  # Fila final de la tabla
+    start_col = 'B'  # Columna inicial para los meses
+    total_apartamento_col = df_resumen1.shape[1]  # Índice de la columna TOTAL/APARTAMENTO
+
+    # Determinar la letra de la última columna antes de TOTAL/APARTAMENTO
+    total_col_letter = ws_resumen.cell(row=start_row, column=total_apartamento_col).column_letter
+    rango_tabla = ws_resumen[f"{start_col}{start_row}":f"{chr(ord(total_col_letter) - 1)}{end_row}"]
+
+    # Obtener los valores de la tabla para calcular el rango de valores positivos
+    valores = [cell.value for row in rango_tabla for cell in row if isinstance(cell.value, (int, float)) and cell.value > 0]
+
+    # Verificar que existen valores mayores a cero
+    if valores:
+        min_val = min(valores)
+        max_val = max(valores)
+
+        # Definir función para calcular el color en función del valor
+        def obtener_color(valor):
+            if valor <= 0:
+                return PatternFill(start_color="FFFFFF", end_color="FFFFFF", fill_type="solid")  # Blanco para valores <= 0
+            ratio = (valor - min_val) / (max_val - min_val) if max_val > min_val else 0
+            if ratio > 0.40:
+                return PatternFill(start_color="63BE7B", end_color="63BE7B", fill_type="solid")  # Verde
+            elif ratio > 0.20:
+                return PatternFill(start_color="FFEB84", end_color="FFEB84", fill_type="solid")  # Amarillo
+            else:
+                return PatternFill(start_color="F8696B", end_color="F8696B", fill_type="solid")  # Rojo
+
+        # Aplicar el color a cada celda en el rango
+        for row in rango_tabla:
+            for cell in row:
+                if isinstance(cell.value, (int, float)) and cell.value > 0:
+                    cell.fill = obtener_color(cell.value)
+
+
+# LEYENDAS MAPA DE CALOR
+
+
+    # LEYENDA 1 MAPA VERDE/AMARILLO/VERDE
+
+    leyenda_inicio_fila = end_row + 3  # Colocamos la leyenda un par de filas debajo de la tabla
+    ws_resumen[f"A{leyenda_inicio_fila}"] = "Leyenda Mapa de Calor (INGRESOS MENSUALES POR APARTAMENTO (EUR) )"
+    ws_resumen[f"A{leyenda_inicio_fila + 1}"] = "Valor alto"
+    ws_resumen[f"A{leyenda_inicio_fila + 2}"] = "Valor medio"
+    ws_resumen[f"A{leyenda_inicio_fila + 3}"] = "Valor bajo"
+
+    # Aplicar colores correspondientes a cada valor de la leyenda
+    ws_resumen[f"B{leyenda_inicio_fila + 1}"].fill = PatternFill(start_color="63BE7B", end_color="63BE7B", fill_type="solid")  # Verde (alto)
+    ws_resumen[f"B{leyenda_inicio_fila + 2}"].fill = PatternFill(start_color="FFEB84", end_color="FFEB84", fill_type="solid")  # Amarillo (medio)
+    ws_resumen[f"B{leyenda_inicio_fila + 3}"].fill = PatternFill(start_color="F8696B", end_color="F8696B", fill_type="solid")  # Rojo (bajo)
+
+
+    # LEYENDA 2 MAPA AZUL (TOTAL APARTAMENTOS)
+
+    # Agregar una leyenda al lado de la tabla
+    leyenda_inicio_fila = end_row + 8  # Colocamos la leyenda un par de filas debajo de la tabla
+    ws_resumen[f"A{leyenda_inicio_fila}"] = "Leyenda  Mapa de Calor (INGRESO ANUAL POR APARTAMENTO (EUR))"
+    ws_resumen[f"A{leyenda_inicio_fila + 1}"] = "Valor alto"
+    ws_resumen[f"A{leyenda_inicio_fila + 2}"] = "Valor medio"
+    ws_resumen[f"A{leyenda_inicio_fila + 3}"] = "Valor bajo"
+
+    # Aplicar colores correspondientes a cada valor de la leyenda
+    ws_resumen[f"B{leyenda_inicio_fila + 1}"].fill = PatternFill(start_color="045A8D", end_color="045A8D", fill_type="solid")  # Azul oscuro (alto)
+    ws_resumen[f"B{leyenda_inicio_fila + 2}"].fill = PatternFill(start_color="6497B1", end_color="6497B1", fill_type="solid")  # Azul medio
+    ws_resumen[f"B{leyenda_inicio_fila + 3}"].fill = PatternFill(start_color="B3CDE3", end_color="B3CDE3", fill_type="solid")  # Azul claro (bajo)
+
+
+
+
+
+
+    # Guardar el archivo con los cambios
+    wb.save(nuevo_archivo_excel)
+
+
+
+
+
+
+
+#--------------------------------------------------------------------------------------------------
+
+
+
+
 
     # Definir los colores para el formato condicional
     fill_green = PatternFill(start_color="00FF00", end_color="00FF00", fill_type="solid")
@@ -456,10 +981,122 @@ def revisar_booking(uploaded_file):
         elif cell.value == "NO PAGADO":
             cell.fill = fill_red
 
+
+# TABLA 1
+
+# Agregar y formatear el título
+    ws_resumen['A1'] = 'INGRESOS BOOKING (POR BANCO Y TOTAL EN EUROS)'
+    ws_resumen['A1'].font = Font(bold=True, size=14)
+    ws_resumen.merge_cells('A1:M1')
+
+# TABLA 2
+
+# Agregar y formatear el título
+    ws_resumen['A27'] = 'INGRESOS BOOKING (POR APARTAMENTO Y TOTAL EN EUROS)'
+    ws_resumen['A27'].font = Font(bold=True, size=14)
+    ws_resumen.merge_cells('A27:M27')
+
+
+
+
+   
+    # Seleccionar la hoja RESUMEN AIRBNB
+    ws_resumen = wb['RESUMEN BOOKING']
+
+#---------------------------------------------------------------------------------------
+    
+    # GRAFICOS TABLAS BOOKING
+
+
+    #GRAFICO TABLA 1
+    
+    def agregar_grafico_barra1(ws_resumen):
+            
+            # Definir el rango de datos para el gráfico
+            data = Reference(ws_resumen, min_col=2, min_row=10, max_col=13, max_row=10)
+            categories = Reference(ws_resumen, min_col=2, min_row=3, max_col=13, max_row=44)
+
+            # Crear un objeto de gráfico de barras
+            chart = BarChart()
+            chart.title = 'INGRESOS BOOKING (POR BANCO Y TOTAL EN EUROS)'
+            chart.y_axis.title = "TOTAL (EUROS)"
+            chart.x_axis.title = "MESES"
+
+            # Añadir los datos y categorías al gráfico
+            chart.add_data(data, titles_from_data=False)
+            chart.set_categories(categories)
+
+            # Configurar los títulos del eje y añadir etiquetas de datos
+            #chart.dataLabels = DataLabelList()
+            #chart.dataLabels.showVal = True
+
+
+        # Ajustar para que los meses aparezcan directamente debajo de cada barra
+            chart.x_axis.majorTickMark = "out"  # Marca de mayor precisión en el eje X
+            chart.x_axis.label_alignment = "center"  # Centra cada mes debajo de cada barra
+
+
+
+            # Añadir el gráfico a la hoja, colocando el gráfico en una celda específica
+            ws_resumen.add_chart(chart, "A13")
+
+        # Llamar a la función para agregar el gráfico de barras en la hoja "RESUMEN AIRBNB"
+    agregar_grafico_barra1(ws_resumen)
+
+
+
+# GRAFICO TABLA 2
+
+    def agregar_grafico_barras2(ws_resumen):
+        
+        # Definir el rango de datos para el gráfico
+        data = Reference(ws_resumen, min_col=2, min_row=45, max_col=13, max_row=45)
+        categories = Reference(ws_resumen, min_col=2, min_row=29, max_col=13, max_row=41)
+
+        # Crear un objeto de gráfico de barras
+        chart = BarChart()
+        chart.title = 'INGRESOS BOOKING (TOTAL APARTAMENTOS EN EUROS)'
+        chart.y_axis.title = "TOTAL (EUROS)"
+        chart.x_axis.title = "MESES"
+
+        # Añadir los datos y categorías al gráfico
+        chart.add_data(data, titles_from_data=False)
+        chart.set_categories(categories)
+
+        # Configurar los títulos del eje y añadir etiquetas de datos
+        #chart.dataLabels = DataLabelList()
+        #chart.dataLabels.showVal = True
+
+
+    # Ajustar para que los meses aparezcan directamente debajo de cada barra
+        chart.x_axis.majorTickMark = "out"  # Marca de mayor precisión en el eje X
+        chart.x_axis.label_alignment = "center"  # Centra cada mes debajo de cada barra
+
+
+
+        # Añadir el gráfico a la hoja, colocando el gráfico en una celda específica
+        ws_resumen.add_chart(chart, "A57")
+
+    # Llamar a la función para agregar el gráfico de barras en la hoja "RESUMEN AIRBNB"
+    agregar_grafico_barras2(ws_resumen)
+
+
+
+
+
+
+
+
+
+
+
+
+
+#-----------------------------------------------------------------------------------------------
     # Guardar el archivo con los cambios
     wb.save(nuevo_archivo_excel)
 
-    st.success(f"El nuevo archivo '{nuevo_archivo_excel}' ha sido creado con las hojas '{nueva_hoja_consolidados}', '{nueva_hoja_pagos_booking}', y '{nueva_hoja_smoobu_booking}'.")
+    st.success(f"El nuevo archivo '{nuevo_archivo_excel}' ha sido creado con las hojas '{nueva_hoja_consolidados}', '{nueva_hoja_pagos_booking}', '{nueva_hoja_smoobu_booking}' y 'RESUMEN BOOKING'.")
     
     #df_final = pd.concat([df_consolidados_filtrados_sorted, df_pagos_verificada, df_smoobu], axis=1)
     #return df_final
@@ -512,3 +1149,8 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+
+
+
